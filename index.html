@@ -54,14 +54,6 @@ footer{text-align:center;color:#aaa493;font:12px Georgia,serif;padding:20px}
 <button class="secondary" id="exportData">Export backup (JSON)</button>
 <p class="muted">Entries are saved on this device in this browser. Export a backup regularly.</p>
 </div></div>
-<div class="card"><h2>Cloud sync</h2>
-<p class="muted">Sign in with Google to back up your PATH journal to your Firebase project.</p>
-<div id="cloudStatus" class="muted">Checking Firebase connection…</div>
-<button class="primary" id="googleSignIn">Continue with Google</button>
-<button class="secondary" id="googleSignOut" style="display:none">Sign out</button>
-<button class="secondary" id="syncNow" style="display:none">Sync now</button>
-<p class="muted">Your journal also saves locally on this device. Export a JSON backup regularly.</p>
-</div>
 <div class="card"><h2>Recent journal entries</h2><div id="recentEntries" class="empty">Your saved entries will appear here.</div></div>
 </section>
 <section class="panel" id="progress"><div class="card"><h2>Monthly overview</h2><label for="monthPick">Choose month</label><input id="monthPick" type="month"><div id="monthStats" class="muted" style="margin:14px 0">No entries yet.</div><div id="chart"></div></div></section>
@@ -70,9 +62,6 @@ footer{text-align:center;color:#aaa493;font:12px Georgia,serif;padding:20px}
 <section class="panel" id="doubts"><div class="card"><h2>Doubt manager</h2><label for="doubtSubject">Subject</label><select id="doubtSubject"><option>Physics</option><option>Chemistry</option><option>Maths</option></select><label for="doubtTopic">Chapter / topic</label><input id="doubtTopic" placeholder="Chapter or question number"><label for="doubtText">Your doubt</label><textarea id="doubtText" placeholder="Write what you don't understand..."></textarea><button class="primary" id="addDoubt">Save doubt</button><div id="doubtList"></div></div></section>
 <footer>PATH · small steps, strong foundations</footer>
 </main>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
 const KEY='path_journal_v1';
 const defaults={entries:{},habits:['Study session','Revise yesterday','Solve practice questions','Sleep on time'],habitDays:{},errors:[],doubts:[]};
@@ -100,107 +89,6 @@ $('addDoubt').onclick=()=>{let text=$('doubtText').value.trim();if(!text){alert(
 function drawDoubts(){$('doubtList').innerHTML=data.doubts.length?data.doubts.map((x,i)=>`<div class="item"><div><b>${x.subject} · ${x.topic||'Doubt'}</b><small>${x.date} · ${x.text}</small><small>Status: ${x.done?'Resolved':'Pending'}</small><button class="secondary" data-resolve="${i}">${x.done?'Reopen':'Mark resolved'}</button></div><button class="secondary" data-del-doubt="${i}">Delete</button></div>`).join(''):'<div class="empty">No doubts yet.</div>';$('doubtList').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>{data.doubts[+b.dataset.resolve].done=!data.doubts[+b.dataset.resolve].done;persist()});$('doubtList').querySelectorAll('[data-del-doubt]').forEach(b=>b.onclick=()=>{data.doubts.splice(+b.dataset.delDoubt,1);persist()})}
 $('exportData').onclick=()=>{let blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='PATH-backup-'+today+'.json';a.click();URL.revokeObjectURL(url)};
 loadDay();refresh();drawHabits();drawErrors();drawDoubts();
-
-// Firebase is configured for this PATH project. Web config values are public identifiers,
-// not service-account credentials. Never put a service-account private key in this file.
-const firebaseConfig = {
-  apiKey: "AIzaSyCxj4Hh2JV4Jb_HED38mDxkZWKMdqzCgp3x4",
-  authDomain: "path-b0a29.firebaseapp.com",
-  projectId: "path-b0a29",
-  storageBucket: "path-b0a29.firebasestorage.app",
-  messagingSenderId: "107322221589",
-  appId: "1:107322221589:web:212ef626113175ae99da1c"
-};
-let cloudAuth=null, cloudDb=null, cloudUser=null, cloudReady=false, syncTimer=null;
-try {
-  if (window.firebase && !firebase.apps.length) firebase.initializeApp(firebaseConfig);
-  if (window.firebase) {
-    cloudAuth=firebase.auth();
-    cloudDb=firebase.firestore();
-    cloudReady=true;
-    $('cloudStatus').textContent='Firebase connected. Sign in to enable cloud backup.';
-  }
-} catch(err) {
-  $('cloudStatus').textContent='Firebase setup needs attention: '+err.message;
-}
-function cloudDoc(){
-  return cloudDb.collection('users').doc(cloudUser.uid).collection('path').doc('journal');
-}
-async function syncCloud(){
-  if(!cloudUser || !cloudReady) return;
-  try {
-    $('cloudStatus').textContent='Syncing your journal…';
-    const ref=cloudDoc();
-    const snap=await ref.get();
-    if(snap.exists){
-      const remote=snap.data().journal || {};
-      const localRaw=JSON.parse(localStorage.getItem(KEY)||'{}');
-      const merged={
-        ...remote,
-        ...localRaw,
-        entries:{...(remote.entries||{}),...(localRaw.entries||{})},
-        habitDays:{...(remote.habitDays||{}),...(localRaw.habitDays||{})},
-        habits:Array.from(new Set([...(remote.habits||[]),...(localRaw.habits||[])])),
-        errors:[...(localRaw.errors||[]),...(remote.errors||[])].filter((v,i,a)=>a.findIndex(z=>JSON.stringify(z)===JSON.stringify(v))===i),
-        doubts:[...(localRaw.doubts||[]),...(remote.doubts||[])].filter((v,i,a)=>a.findIndex(z=>JSON.stringify(z)===JSON.stringify(v))===i)
-      };
-      data=merged;
-      localStorage.setItem(KEY,JSON.stringify(data));
-      await ref.set({journal:data,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
-      refresh();loadDay();drawHabits();drawErrors();drawDoubts();
-    } else {
-      await ref.set({journal:data,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
-    }
-    $('cloudStatus').textContent='Synced to your Google account ✓';
-  } catch(err) {
-    $('cloudStatus').textContent='Sync failed: '+err.message+' — check Firestore rules and authorised domains.';
-  }
-}
-function queueCloudSync(){
-  if(!cloudUser) return;
-  clearTimeout(syncTimer);
-  syncTimer=setTimeout(syncCloud,1400);
-}
-if(cloudAuth){
-  cloudAuth.onAuthStateChanged(async user=>{
-    cloudUser=user;
-    $('googleSignIn').style.display=user?'none':'inline-block';
-    $('googleSignOut').style.display=user?'inline-block':'none';
-    $('syncNow').style.display=user?'inline-block':'none';
-    if(user){
-      $('cloudStatus').textContent='Signed in as '+(user.email||'Google account')+'. Preparing sync…';
-      await syncCloud();
-    }else{
-      $('cloudStatus').textContent='Not signed in. Your entries remain saved on this device.';
-    }
-  });
-  $('googleSignIn').onclick=async()=>{
-    try{
-      const provider=new firebase.auth.GoogleAuthProvider();
-      provider.setCustomParameters({prompt:'select_account'});
-      await cloudAuth.signInWithPopup(provider);
-    }catch(err){
-      if(err.code==='auth/popup-blocked'||err.code==='auth/operation-not-supported-in-this-environment'){
-        try{await cloudAuth.signInWithRedirect(new firebase.auth.GoogleAuthProvider())}
-        catch(e){$('cloudStatus').textContent='Google sign-in error: '+e.message}
-      }else{
-        $('cloudStatus').textContent='Google sign-in error: '+err.message;
-      }
-    }
-  };
-  cloudAuth.getRedirectResult().catch(err=>{
-    $('cloudStatus').textContent='Google sign-in error: '+err.message;
-  });
-  $('googleSignOut').onclick=()=>cloudAuth.signOut();
-  $('syncNow').onclick=syncCloud;
-}
-const originalPersist=persist;
-persist=function(){
-  localStorage.setItem(KEY,JSON.stringify(data));
-  refresh();
-  queueCloudSync();
-};
-
 </script>
 </body>
 </html>
